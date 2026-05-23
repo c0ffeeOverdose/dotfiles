@@ -1,0 +1,39 @@
+# This file sources other files in `hyprland` and `custom` folders
+# You wanna add your stuff in files in `custom`
+
+$qsConfig = ii
+exec = hyprctl dispatch submap global # DO NOT REMOVE THIS OR YOU WON'T BE ABLE TO USE ANY KEYBIND
+submap = global # This is required for catchall to work
+
+# Environment variables
+source=hyprland/env.conf
+source=custom/env.conf
+
+# Defaults
+source=hyprland/execs.conf
+source=hyprland/general.conf
+source=hyprland/rules.conf
+source=hyprland/colors.conf
+source=hyprland/keybinds.conf
+
+# Custom
+source=custom/execs.conf
+source=custom/general.conf
+source=custom/rules.conf
+source=custom/keybinds.conf
+source=custom/input.conf
+source=custom/network.conf
+
+# nwg-displays support
+source=workspaces.conf
+source=monitors.conf
+
+#misc {
+#    vrr = 0
+#}
+
+misc {
+    initial_workspace_tracking = 2
+    focus_on_activate = false
+    vrr = 0
+}
