@@ -69,17 +69,6 @@ cd dotfiles
 
 The script copies only files tracked by this repository. Existing target files that would be replaced are backed up under `~/.config/.dotfile-backups/<timestamp>/`.
 
-## Update To My Latest Version
-
-From wherever you cloned the repo, update and apply the overlay with:
-
-```bash
-cd /path/to/dotfiles
-./scripts/apply-dotfile.sh --pull --target "$HOME/.config"
-```
-
-Use `--dry-run` first if you want to preview changes.
-
 ## Quickshell AI Notes
 
 The Quickshell sidebar can use multiple AI backends, including the official Antigravity CLI through `agy`.
