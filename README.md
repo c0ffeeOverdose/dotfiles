@@ -94,9 +94,3 @@ The Antigravity integration is designed to:
 - Sync local Antigravity skills into the isolated sidebar AGY home without copying conversation history.
 
 Chat mode is an instruction-level guard for AGY, not a hard sandbox. The Antigravity CLI does not expose a true no-tools mode, and `--sandbox` was not sufficient as a hard write boundary in local testing.
-
-## Secrets
-
-This repo is configured as a whitelist-style dotfile repo. Most of `~/.config` is ignored by default, and only selected config trees are tracked.
-
-Do not commit machine-local state, browser profiles, API keys, tokens, private keys, keyrings, generated AGY history, or other runtime data. API keys used by the sidebar are expected to live outside the repo, for example in the desktop secret store.
