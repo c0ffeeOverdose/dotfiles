@@ -83,6 +83,17 @@ Item {
             }
         },
         {
+            name: "agy-stateful",
+            description: Translation.tr("Toggle AGY memory between Stateful and Stateless."),
+            execute: args => {
+                if (args.length == 0 || args[0] == "get") {
+                    Ai.printAgyStateful();
+                } else {
+                    Ai.setAgyStateful(args[0]);
+                }
+            }
+        },
+        {
             name: "tool",
             description: Translation.tr("Set the tool to use for the model."),
             execute: args => {
@@ -239,6 +250,12 @@ Inline w/ backslash and round brackets \\(e^{i\\pi} + 1 = 0\\)
 
         // Always scroll to bottom when user sends a message
         messageListView.positionViewAtEnd();
+    }
+
+    function setCommandText(commandName, addSpace = true) {
+        messageInputField.text = root.commandPrefix + commandName + (addSpace ? " " : "");
+        messageInputField.cursorPosition = messageInputField.text.length;
+        messageInputField.forceActiveFocus();
     }
 
     Process {
@@ -588,6 +605,30 @@ Inline w/ backslash and round brackets \\(e^{i\\pi} + 1 = 0\\)
                                         description: mode.target === "agent" ? Translation.tr("Agent mode: can act, edit, and run safe commands; asks before dangerous ones.") : Translation.tr("Chat mode: chat, read-only file exploration, and web search/fetch; no writes or agentic commands.")
                                     };
                                 });
+                            } else if (messageInputField.text.startsWith(`${root.commandPrefix}agy-stateful`)) {
+                                root.suggestionQuery = messageInputField.text.split(" ")[1] ?? "";
+                                const stateDescriptions = {
+                                    "get": Translation.tr("Show the current AGY memory mode."),
+                                    "stateful": Translation.tr("Use AGY conversation memory with agy --conversation."),
+                                    "stateless": Translation.tr("Use stateless agy --prompt with the sidebar transcript."),
+                                };
+                                const stateOptions = Object.keys(stateDescriptions);
+                                const stateResults = Fuzzy.go(root.suggestionQuery, stateOptions.map(option => {
+                                    return {
+                                        name: Fuzzy.prepare(option),
+                                        obj: option
+                                    };
+                                }), {
+                                    all: true,
+                                    key: "name"
+                                });
+                                root.suggestionList = stateResults.map(option => {
+                                    return {
+                                        name: `${messageInputField.text.trim().split(" ").length == 1 ? (root.commandPrefix + "agy-stateful ") : ""}${option.target}`,
+                                        displayName: option.target,
+                                        description: stateDescriptions[option.target]
+                                    };
+                                });
                             } else if (messageInputField.text.startsWith(`${root.commandPrefix}prompt`)) {
                                 root.suggestionQuery = messageInputField.text.split(" ")[1] ?? "";
                                 const promptFileResults = Fuzzy.go(root.suggestionQuery, Ai.promptFiles.map(file => {
@@ -767,7 +808,7 @@ Inline w/ backslash and round brackets \\(e^{i\\pi} + 1 = 0\\)
                 }
             }
 
-            RowLayout { // Controls
+            Item { // Controls
                 id: commandButtonsRow
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -775,7 +816,8 @@ Inline w/ backslash and round brackets \\(e^{i\\pi} + 1 = 0\\)
                 anchors.bottomMargin: 5
                 anchors.leftMargin: 10
                 anchors.rightMargin: 5
-                spacing: 4
+                implicitHeight: Math.max(statusIndicators.implicitHeight, quickCommandGroup.implicitHeight)
+                height: implicitHeight
 
                 property var commandsShown: [
                     {
@@ -789,26 +831,12 @@ Inline w/ backslash and round brackets \\(e^{i\\pi} + 1 = 0\\)
                     },
                 ]
 
-                ApiInputBoxIndicator {
-                    // Model indicator
-                    icon: "api"
-                    text: Ai.getModel().name
-                    tooltipText: Translation.tr("Current model: %1\nSet it with /model MODEL").arg(Ai.getModel().name)
-                }
-
-                ApiInputBoxIndicator {
-                    // Mode indicator
-                    icon: Ai.currentMode === "agent" ? "smart_toy" : "chat"
-                    text: Ai.modeDisplayName()
-                    tooltipText: Translation.tr("Current mode: %1\nSet it with /mode Chat or /mode Agent").arg(Ai.modeDisplayName())
-                }
-
-                Item {
-                    Layout.fillWidth: true
-                }
-
                 ButtonGroup {
+                    id: quickCommandGroup
                     // Command buttons
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: implicitHeight
                     padding: 0
 
                     Repeater {
@@ -821,15 +849,57 @@ Inline w/ backslash and round brackets \\(e^{i\\pi} + 1 = 0\\)
                                 if (modelData.sendDirectly) {
                                     root.handleInput(commandRepresentation);
                                 } else {
-                                    messageInputField.text = commandRepresentation + (modelData.dontAddSpace ? "" : " ");
-                                    messageInputField.cursorPosition = messageInputField.text.length;
-                                    messageInputField.forceActiveFocus();
+                                    root.setCommandText(modelData.name, !modelData.dontAddSpace);
                                 }
                                 if (modelData.name === "clear") {
                                     messageInputField.text = "";
                                 }
                             }
                         }
+                    }
+                }
+
+                RowLayout {
+                    id: statusIndicators
+                    anchors.left: parent.left
+                    anchors.right: quickCommandGroup.left
+                    anchors.rightMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: implicitHeight
+                    spacing: 4
+                    clip: true
+
+                    ApiInputBoxIndicator {
+                        // Model indicator
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 42
+                        Layout.maximumWidth: 150
+                        maximumTextWidth: 115
+                        icon: "api"
+                        text: Ai.getModel().name
+                        tooltipText: Translation.tr("Current model: %1\nClick to use /model").arg(Ai.getModel().name)
+                        clickAction: () => root.setCommandText("model")
+                    }
+
+                    ApiInputBoxIndicator {
+                        // Mode indicator
+                        Layout.maximumWidth: 72
+                        maximumTextWidth: 45
+                        icon: Ai.currentMode === "agent" ? "smart_toy" : "chat"
+                        text: Ai.modeDisplayName()
+                        tooltipText: Translation.tr("Current mode: %1\nClick to use /mode").arg(Ai.modeDisplayName())
+                        clickAction: () => root.setCommandText("mode")
+                    }
+
+                    ApiInputBoxIndicator {
+                        // AGY memory mode indicator
+                        visible: Ai.getModel().api_format === "agy"
+                        Layout.maximumWidth: 100
+                        maximumTextWidth: 72
+                        icon: Ai.currentAgyStateful ? "history" : "bolt"
+                        text: Ai.agyStateDisplayName()
+                        tooltipText: Translation.tr("AGY memory: %1\nStateful uses agy --conversation. Stateless uses agy --prompt with the sidebar transcript.\nClick to use /agy-stateful").arg(Ai.agyStateDisplayName())
+                        clickAction: () => root.setCommandText("agy-stateful")
                     }
                 }
             }

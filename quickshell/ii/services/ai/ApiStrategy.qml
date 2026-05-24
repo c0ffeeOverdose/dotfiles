@@ -2,6 +2,7 @@ import QtQuick
 
 QtObject {
     property string activeMode: ""
+    property bool agyStateful: true
     property string agyConversationId: ""
     property string agyContractPath: ""
     property string agyHomePath: ""

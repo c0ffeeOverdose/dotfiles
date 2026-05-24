@@ -9,19 +9,32 @@ Item { // Model indicator
     property string icon: "api"
     property string text: ""
     property string tooltipText: ""
-    implicitHeight: rowLayout.implicitHeight + 4 * 2
-    implicitWidth: rowLayout.implicitWidth + 4 * 2
+    property real maximumTextWidth: -1
+    property var clickAction: null
+    property real padding: 4
+    clip: true
+    implicitHeight: rowLayout.implicitHeight + padding * 2
+    implicitWidth: (iconItem.implicitWidth ?? iconItem.width) + rowLayout.spacing + (maximumTextWidth > 0 ? Math.min(providerName.implicitWidth, maximumTextWidth) : providerName.implicitWidth) + padding * 2
 
     RowLayout {
         id: rowLayout
-        anchors.centerIn: parent
+        anchors {
+            left: parent.left
+            right: parent.right
+            verticalCenter: parent.verticalCenter
+            leftMargin: root.padding
+            rightMargin: root.padding
+        }
 
         MaterialSymbol {
+            id: iconItem
             text: root.icon
             iconSize: Appearance.font.pixelSize.normal
         }
         StyledText {
             id: providerName
+            Layout.fillWidth: true
+            Layout.maximumWidth: root.maximumTextWidth > 0 ? root.maximumTextWidth : implicitWidth
             font.pixelSize: Appearance.font.pixelSize.smaller
             color: Appearance.m3colors.m3onSurface
             elide: Text.ElideRight
@@ -31,11 +44,15 @@ Item { // Model indicator
     }
 
     Loader {
-        active: root.tooltipText?.length > 0
+        active: root.tooltipText?.length > 0 || root.clickAction !== null
         anchors.fill: parent
         sourceComponent: MouseArea {
             id: mouseArea
             hoverEnabled: true
+            cursorShape: root.clickAction !== null ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: {
+                if (root.clickAction !== null) root.clickAction();
+            }
 
             StyledToolTip {
                 id: toolTip

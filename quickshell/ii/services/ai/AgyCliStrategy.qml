@@ -14,8 +14,20 @@ ApiStrategy {
         return "agy"
     }
 
-    function wrapCdata(value: string): string {
-        return "<![CDATA[\n" + value.split("]]>").join("]]]]><![CDATA[>") + "\n]]>"
+    function modeDisplayName(mode: string): string {
+        return mode === "agent" ? "Agent" : "Chat"
+    }
+
+    function renderTranscript(messages): string {
+        return messages.map(message => {
+            const role = message.role === "assistant" ? "Assistant" : "User"
+            const content = message.rawContent || message.content || ""
+            let rendered = `### ${role}\n${content}`
+            if (message.localFilePath && message.localFilePath.length > 0) {
+                rendered += `\n\n[Attached local file path: ${message.localFilePath}]`
+            }
+            return rendered
+        }).join("\n\n")
     }
 
     function buildRequestData(model: AiModel, messages, systemPrompt: string, temperature: real, tools: list<var>, filePath: string) {
@@ -36,20 +48,20 @@ ApiStrategy {
             }
         }
 
-        if (agyConversationId.length === 0 && latestUserIndex > 0) {
-            hydrationTranscript = messages.slice(0, latestUserIndex).map(message => {
-                const role = message.role === "assistant" ? "assistant" : "user"
-                const content = message.rawContent || message.content || ""
-                let rendered = `<message role="${role}">\n${wrapCdata(content)}\n</message>`
-                if (message.localFilePath && message.localFilePath.length > 0) {
-                    rendered += `\n<attached_local_path>${message.localFilePath}</attached_local_path>`
-                }
-                return rendered
-            }).join("\n")
+        const mode = activeMode === "agent" ? "agent" : "chat"
+        const modeName = modeDisplayName(mode)
+
+        if (!agyStateful) {
+            const transcript = renderTranscript(messages)
+            prompt = `You are continuing a chat from the Quickshell sidebar. Use the system instructions and transcript below, then answer the latest user message directly.\n\n## Sidebar State\n- Conversation mode: ${modeName}\n- AGY memory mode: Stateless (--prompt with sidebar transcript)\n\n## System Instructions\n${systemPrompt}\n\n## Conversation Transcript\n${transcript}`
+            return { "prompt": prompt }
         }
 
-        const mode = activeMode === "agent" ? "agent" : "chat"
-        prompt = `<runtime_context>\n  <active_mode>${mode}</active_mode>\n  <turn_id>${turnId}</turn_id>\n</runtime_context>\n\n<user_request>\n${wrapCdata(latestUserMessage)}\n</user_request>`
+        if (agyConversationId.length === 0 && latestUserIndex > 0) {
+            hydrationTranscript = renderTranscript(messages.slice(0, latestUserIndex))
+        }
+
+        prompt = `## Sidebar Runtime\n- Active mode: ${modeName}\n- AGY memory mode: Stateful conversation\n- Turn ID: ${turnId}\n\n## Latest User Request\n${latestUserMessage}`
         return { "prompt": prompt }
     }
 
@@ -90,6 +102,7 @@ ApiStrategy {
         const escapedAttachmentPath = CF.StringUtils.shellSingleQuoteEscape(attachmentPath)
         const escapedAgyBinary = CF.StringUtils.shellSingleQuoteEscape(agyBinary)
         const escapedConversationId = CF.StringUtils.shellSingleQuoteEscape(agyConversationId)
+        const escapedAgyStateful = agyStateful ? "1" : "0"
         const escapedContractPath = CF.StringUtils.shellSingleQuoteEscape(CF.FileUtils.trimFileProtocol(agyContractPath))
         const escapedAgyHomePath = CF.StringUtils.shellSingleQuoteEscape(CF.FileUtils.trimFileProtocol(agyHomePath))
         const escapedModelLabel = CF.StringUtils.shellSingleQuoteEscape(modelLabel)
@@ -109,6 +122,7 @@ cleanup() {
 trap cleanup EXIT
 
 CONVERSATION_ID='${escapedConversationId}'
+AGY_STATEFUL='${escapedAgyStateful}'
 CONTRACT_PATH='${escapedContractPath}'
 AGY_HOME_PATH='${escapedAgyHomePath}'
 MODEL_LABEL='${escapedModelLabel}'
@@ -116,6 +130,10 @@ USER_SYSTEM_PROMPT='${escapedUserSystemPrompt}'
 TURN_ID='${escapedTurnId}'
 HYDRATION_TRANSCRIPT='${escapedHydrationTranscript}'
 SOURCE_HOME="\${HOME:-}"
+
+if [ "$AGY_STATEFUL" != "1" ]; then
+    CONVERSATION_ID=""
+fi
 
 ensure_agy_dest() {
     case "$1" in
@@ -187,7 +205,7 @@ if [ -n "$MODEL_LABEL" ]; then
     fi
 fi
 
-if [ -z "$CONVERSATION_ID" ]; then
+if [ "$AGY_STATEFUL" = "1" ] && [ -z "$CONVERSATION_ID" ]; then
     if [ ! -f "$CONTRACT_PATH" ]; then
         printf '**Antigravity CLI error**\n\n~~~text\nAGY sidebar contract prompt was not found: %s\n~~~\n' "$CONTRACT_PATH"
         exit 1
@@ -195,10 +213,10 @@ if [ -z "$CONVERSATION_ID" ]; then
     {
         cat "$CONTRACT_PATH"
         if [ -n "$USER_SYSTEM_PROMPT" ]; then
-            printf '\n\n<user_system_prompt>\n%s\n</user_system_prompt>' "$USER_SYSTEM_PROMPT"
+            printf '\n\n## User System Prompt\n%s' "$USER_SYSTEM_PROMPT"
         fi
         if [ -n "$HYDRATION_TRANSCRIPT" ]; then
-            printf '\n\n<conversation_transcript>\n%s\n</conversation_transcript>' "$HYDRATION_TRANSCRIPT"
+            printf '\n\n## Existing Sidebar Transcript\n%s' "$HYDRATION_TRANSCRIPT"
         fi
         printf '\n\n%s' '${escapedPrompt}'
     } > "$PROMPT_FILE"
@@ -209,26 +227,25 @@ fi
 ATTACHMENT_PATH='${escapedAttachmentPath}'
 if [ -n "$ATTACHMENT_PATH" ]; then
     {
-        printf '\n\n<attached_file>\n'
-        printf '<path>%s</path>\n' "$ATTACHMENT_PATH"
+        printf '\n\n## Attached File\n'
+        printf 'Path: %s\n' "$ATTACHMENT_PATH"
         if [ -f "$ATTACHMENT_PATH" ]; then
             MIME_TYPE="$(file -b --mime-type "$ATTACHMENT_PATH" 2>/dev/null || true)"
             ENCODING="$(file -b --mime-encoding "$ATTACHMENT_PATH" 2>/dev/null || true)"
-            printf '<mime_type>%s</mime_type>\n' "\${MIME_TYPE:-unknown}"
+            printf 'MIME type: %s\n' "\${MIME_TYPE:-unknown}"
             case "$MIME_TYPE:$ENCODING" in
                 text/*:*|application/json:*|application/javascript:*|application/xml:*|application/x-sh:*|*:utf-8|*:us-ascii)
-                    printf '<content><![CDATA[\n'
+                    printf '\n~~~text\n'
                     cat "$ATTACHMENT_PATH"
-                    printf '\n]]></content>\n'
+                    printf '\n~~~\n'
                     ;;
                 *)
-                    printf '<note>Binary or non-text file. Use the local path above if you need to inspect it.</note>\n'
+                    printf 'Binary or non-text file. Use the local path above if you need to inspect it.\n'
                     ;;
             esac
         else
-            printf '<note>File not found.</note>\n'
+            printf 'File not found.\n'
         fi
-        printf '</attached_file>\n'
     } >> "$PROMPT_FILE"
 fi
 
@@ -246,10 +263,12 @@ if [ -z "$AGY_BIN" ]; then
     exit 127
 fi
 
-if [ -n "$CONVERSATION_ID" ]; then
+if [ "$AGY_STATEFUL" = "1" ] && [ -n "$CONVERSATION_ID" ]; then
     timeout "$AGY_TIMEOUT" "$AGY_BIN" --conversation "$CONVERSATION_ID" --prompt "$(cat "$PROMPT_FILE")" < /dev/null >"$STDOUT_FILE" 2>"$ERROR_FILE"
-else
+elif [ "$AGY_STATEFUL" = "1" ]; then
     timeout "$AGY_TIMEOUT" "$AGY_BIN" --prompt "$(cat "$PROMPT_FILE")" < /dev/null >"$STDOUT_FILE" 2>"$ERROR_FILE"
+else
+    timeout "$AGY_TIMEOUT" "$AGY_BIN" --prompt "$(cat "$PROMPT_FILE")" < /dev/null 2>"$ERROR_FILE"
 fi
 exit_code=$?
 if [ "$exit_code" -ne 0 ]; then
@@ -264,6 +283,10 @@ if [ "$exit_code" -ne 0 ]; then
         cat "$STDOUT_FILE"
         printf '\n~~~\n'
     fi
+    exit 0
+fi
+
+if [ "$AGY_STATEFUL" != "1" ]; then
     exit 0
 fi
 

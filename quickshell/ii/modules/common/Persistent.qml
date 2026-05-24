@@ -61,6 +61,7 @@ Singleton {
             property JsonObject ai: JsonObject {
                 property string model: "agy-gemini-3.5-flash-high"
                 property string mode: "chat"
+                property bool agyStateful: true
                 property string agyConversationId: ""
                 property real temperature: 0.5
             }

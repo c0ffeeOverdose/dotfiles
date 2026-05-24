@@ -28,6 +28,7 @@ Singleton {
     readonly property string apiKeyEnvVarName: "API_KEY"
     readonly property string defaultModelId: "agy-gemini-3.5-flash-high"
     readonly property string defaultMode: "chat"
+    readonly property bool defaultAgyStateful: true
     readonly property string agyHomePath: CF.FileUtils.trimFileProtocol(`${Directories.state}/user/ai/agy-home`)
     readonly property string agySettingsPath: `${root.agyHomePath}/.gemini/antigravity-cli/settings.json`
     readonly property string agyContractPath: Quickshell.shellPath("services/ai/prompts/agy-sidebar-contract.md")
@@ -36,6 +37,7 @@ Singleton {
         const mode = (Persistent.states?.ai?.mode ?? root.defaultMode).toLowerCase();
         return root.modeList.indexOf(mode) !== -1 ? mode : root.defaultMode;
     }
+    property bool currentAgyStateful: Persistent.states?.ai?.agyStateful ?? root.defaultAgyStateful
     readonly property string chatModePrompt: "## Sidebar Mode: Chat\n- You are in Chat mode. Chat with the user and help reason through requests.\n- You may perform read-only file exploration when the user provides a path, attaches a file, or clearly asks you to inspect local files.\n- You may use read-only web tools for web search, Google Search, URL fetch, web fetch, or browser/page fetch when current information or source content is needed.\n- Allowed read-only file operations: read file contents, list directories, glob file paths, and grep/search file contents.\n- Allowed shell commands are limited to `cat`, `ls`, `dir`, `grep`, and `rg` with no pipes, redirects, command substitution, or command chaining. Do not use shell network commands like `curl` or `wget`; use web search/fetch tools instead.\n- Do not create, edit, delete, move, rename, or overwrite files or settings.\n- If the user asks you to modify files, install software, run non-read-only commands, or perform agentic actions, explain that they need to switch to `/mode Agent` first.\n- For Antigravity CLI, treat these rules as strict instructions: only use read/glob/grep/list tools, web search/fetch tools, or the allowed read-only shell commands above."
     readonly property string agentModePrompt: "## Sidebar Mode: Agent\n- You are in Agent mode. You may perform actions, use tools, modify files, and run commands when they are needed for the user's request.\n- Keep actions scoped to the user's request and prefer the smallest correct change.\n- Before running a dangerous or potentially destructive command/action, ask the user for explicit confirmation and wait.\n- Dangerous actions include deleting or overwriting files, bulk moves/renames, sudo/admin commands, package installation/removal, piping network downloads into shells, permission/ownership changes, killing processes, destructive git operations, migrations, secret/credential access, and operations outside the requested scope."
     readonly property string modePrompt: root.currentMode === "agent" ? root.agentModePrompt : root.chatModePrompt
@@ -703,6 +705,34 @@ Singleton {
         root.addMessage(Translation.tr("Mode: %1").arg(root.modeDisplayName()), root.interfaceRole);
     }
 
+    function agyStateDisplayName(stateful = root.currentAgyStateful) {
+        return stateful ? "Stateful" : "Stateless";
+    }
+
+    function printAgyStateful() {
+        root.addMessage(Translation.tr("AGY memory: %1").arg(root.agyStateDisplayName()), root.interfaceRole);
+    }
+
+    function setAgyStateful(value) {
+        if (!value) value = "";
+        value = value.toLowerCase();
+
+        let stateful = root.currentAgyStateful;
+        if (value === "stateful") {
+            stateful = true;
+        } else if (value === "stateless") {
+            stateful = false;
+        } else {
+            root.addMessage(Translation.tr("Usage: /agy-stateful stateful|stateless|get"), root.interfaceRole);
+            return false;
+        }
+
+        if (Persistent.states?.ai) Persistent.states.ai.agyStateful = stateful;
+        root.resetAgyConversation();
+        root.addMessage(Translation.tr("AGY memory set to %1").arg(root.agyStateDisplayName(stateful)), root.interfaceRole);
+        return true;
+    }
+
     function setTool(tool) {
         if (!root.tools[models[currentModelId]?.api_format] || !(tool in root.tools[models[currentModelId]?.api_format])) {
             root.addMessage(Translation.tr("Invalid tool. Supported tools:\n- %1").arg(root.availableTools.join("\n- ")), root.interfaceRole);
@@ -805,10 +835,11 @@ Singleton {
             const messageArray = root.messageIDs.map(id => root.messageByID[id]);
             const filteredMessageArray = messageArray.filter(message => message.role !== Ai.interfaceRole);
             requester.currentStrategy.activeMode = root.currentMode;
+            requester.currentStrategy.agyStateful = root.currentAgyStateful;
             requester.currentStrategy.agyConversationId = Persistent.states?.ai?.agyConversationId ?? "";
             requester.currentStrategy.agyContractPath = root.agyContractPath;
             requester.currentStrategy.agyHomePath = root.agyHomePath;
-            const strategySystemPrompt = model.api_format === "agy" ? root.agyStableUserSystemPrompt() : root.effectiveSystemPrompt;
+            const strategySystemPrompt = model.api_format === "agy" && root.currentAgyStateful ? root.agyStableUserSystemPrompt() : root.effectiveSystemPrompt;
             const data = root.currentApiStrategy.buildRequestData(model, filteredMessageArray, strategySystemPrompt, root.temperature, root.effectiveTools(model, root.currentTool), root.pendingFilePath);
             // console.log("[Ai] Request data: ", JSON.stringify(data, null, 2));
 
@@ -889,7 +920,7 @@ Singleton {
                         root.tokenCount.output = result.tokenUsage.output;
                         root.tokenCount.total = result.tokenUsage.total;
                     }
-                    if (result.agyConversationId) {
+                    if (result.agyConversationId && root.currentAgyStateful) {
                         Persistent.states.ai.agyConversationId = result.agyConversationId;
                     }
                     if (result.finished) {
